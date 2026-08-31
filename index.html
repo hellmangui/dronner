@@ -1,0 +1,499 @@
+<title>Dronner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500&display=swap">
+
+<style>
+  /* Dronner — committed single visual world: dusk, cold ground, ember light.
+     Every colour painted explicitly so the page holds on any host ground. */
+  :root {
+    --night:    #0d1117;
+    --ground:   #161c25;
+    --ridge-far:#1d2733;
+    --ridge-mid:#243040;
+    --fog:      #2c3a4d;
+    --bone:     #d9d3c5;
+    --bone-dim: #8b8677;
+    --ember:    #d2691e;
+    --ember-hi: #f0913f;
+    --blood:    #7d2b1e;
+    --edge:     rgba(217, 211, 197, 0.14);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--night);
+    color: var(--bone);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+    padding: 28px 20px 40px;
+  }
+
+  .masthead {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    text-align: center;
+  }
+
+  h1 {
+    font-family: "Archivo Black", Impact, sans-serif;
+    font-size: clamp(2.1rem, 7vw, 3.4rem);
+    letter-spacing: 0.06em;
+    margin: 0;
+    line-height: 1;
+    color: var(--bone);
+    text-wrap: balance;
+  }
+  .kicker span { color: var(--ember); }
+
+  .kicker {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--bone-dim);
+  }
+
+  .stage {
+    width: 100%;
+    max-width: 940px;
+    border: 1px solid var(--edge);
+    background: var(--ground);
+    position: relative;
+    overflow: hidden;
+  }
+
+  canvas { display: block; width: 100%; height: auto; touch-action: manipulation; }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px 26px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.76rem;
+    color: var(--bone-dim);
+    letter-spacing: 0.04em;
+  }
+  .legend b { color: var(--bone); font-weight: 600; }
+  .legend .k {
+    display: inline-block;
+    border: 1px solid var(--edge);
+    border-bottom-width: 2px;
+    padding: 1px 7px;
+    margin-right: 6px;
+    color: var(--bone);
+    background: rgba(217,211,197,0.04);
+  }
+
+  .touch { display: none; gap: 12px; width: 100%; max-width: 940px; }
+  .touch button {
+    flex: 1;
+    padding: 16px;
+    background: rgba(217,211,197,0.05);
+    border: 1px solid var(--edge);
+    color: var(--bone);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.8rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .touch button:active { background: rgba(210,105,30,0.18); border-color: var(--ember); }
+  @media (hover: none) and (pointer: coarse) { .touch { display: flex; } }
+
+  :focus-visible { outline: 2px solid var(--ember-hi); outline-offset: 3px; }
+
+  footer {
+    font-size: 0.78rem;
+    color: var(--bone-dim);
+    text-align: center;
+    max-width: 60ch;
+    line-height: 1.6;
+  }
+  footer a { color: var(--bone); text-decoration-color: var(--ember); text-underline-offset: 3px; }
+</style>
+
+<div class="masthead">
+  <h1>DRONNER</h1>
+  <p class="kicker">Jump the stones <span>·</span> burn the husks</p>
+</div>
+
+<div class="stage">
+  <canvas id="game" width="1880" height="620" aria-label="Dronner game"></canvas>
+</div>
+
+<div class="legend">
+  <span><span class="k">Space</span> <b>Jump</b> the stones</span>
+  <span><span class="k">↓</span> <b>Burn</b> the husks</span>
+  <span><span class="k">R</span> <b>Restart</b></span>
+</div>
+
+<div class="touch">
+  <button id="bStrike" type="button">Fire</button>
+  <button id="bJump" type="button">Jump</button>
+</div>
+
+<footer>
+  Stones block the path — jump them. Husks stand taller than the dragon can fly —
+  burn them instead. Miss either and the run ends.
+</footer>
+
+<script>
+(() => {
+  "use strict";
+  const cv = document.getElementById("game");
+  const ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height;
+  const GROUND = H * 0.78;
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const C = {
+    night: "#0d1117", ground: "#161c25", far: "#1d2733", mid: "#243040",
+    fog: "#2c3a4d", bone: "#d9d3c5", dim: "#8b8677",
+    ember: "#d2691e", emberHi: "#f0913f", blood: "#5c2f26",
+    // the dragon
+    scale: "#b8342a", belly: "#e2a05c", wing: "#7d2119", wingHi: "#9c2b21"
+  };
+
+  // ---- persistence (may throw in private windows / thumbnailers) ----
+  // Reads the old key too, so the best score survives the rename to Dronner.
+  const store = {
+    get() {
+      try {
+        const v = localStorage.getItem("dronner-best") ?? localStorage.getItem("hel-runner-best");
+        return parseInt(v || "0", 10) || 0;
+      } catch { return 0; }
+    },
+    set(v) { try { localStorage.setItem("dronner-best", String(v)); } catch { /* ignore */ } }
+  };
+
+  const HERO_X = W * 0.17;
+  // Jump apex ≈ 114px: clears stones (max 64) but never a husk (128).
+  // That is what forces both inputs — you cannot jump your way out of a husk.
+  const GRAV = 0.0058, JUMP_V = -1.15;
+  const REACH = 96, HUSK_H = 128;
+
+  let state, best = store.get();
+
+  function reset() {
+    state = {
+      y: 0, vy: 0, onGround: true,
+      striking: 0, run: 0,
+      speed: 0.62, dist: 0,
+      obstacles: [], embers: [],
+      spawnIn: 900, over: false, started: false, t: 0
+    };
+  }
+  reset();
+
+  // ---- parallax ridges, generated once, tiled ----
+  function ridge(seed, amp, step) {
+    const pts = [];
+    let r = seed;
+    const rand = () => (r = (r * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    for (let x = 0; x <= W * 2 + step; x += step) pts.push([x, -rand() * amp]);
+    return pts;
+  }
+  const ridgeFar = ridge(7, H * 0.17, 190);
+  const ridgeMid = ridge(41, H * 0.11, 120);
+
+  function drawRidge(pts, offset, base, fill) {
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.moveTo(-10, H);
+    for (const [x, y] of pts) {
+      const px = ((x - offset) % (W * 2 + 10) + W * 2 + 10) % (W * 2 + 10) - W * 0.5;
+      ctx.lineTo(px, base + y);
+    }
+    ctx.lineTo(W + 10, H);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // ---- hero: a small red dragon, drawn as paths (no sprite sheet) ----
+  function drawDragon(s) {
+    const y = GROUND + s.y;
+    const bob = s.onGround ? Math.sin(s.run * 0.6) * 3 : 0;
+    const flap = s.onGround ? Math.sin(s.run * 0.6) * 0.32 : Math.sin(s.t * 0.02) * 0.85;
+
+    ctx.save();
+    ctx.translate(HERO_X, y + bob);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+
+    // tail — sweeps behind, follows the run cycle
+    ctx.strokeStyle = C.scale;
+    ctx.lineWidth = 13;
+    ctx.beginPath();
+    ctx.moveTo(-14, -48);
+    ctx.quadraticCurveTo(-52, -44 + flap * 16, -80, -66 + flap * 22);
+    ctx.stroke();
+
+    // far wing, behind the body
+    ctx.fillStyle = C.wing;
+    ctx.save();
+    ctx.translate(-6, -60); ctx.rotate(-0.5 + flap);
+    ctx.beginPath();
+    ctx.moveTo(0, 0); ctx.lineTo(-44, -30); ctx.lineTo(-30, 4); ctx.lineTo(-38, 22);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    // body
+    ctx.fillStyle = C.scale;
+    ctx.beginPath();
+    ctx.ellipse(-4, -50, 30, 24, -0.12, 0, Math.PI * 2);
+    ctx.fill();
+
+    // belly
+    ctx.fillStyle = C.belly;
+    ctx.beginPath();
+    ctx.ellipse(-2, -42, 20, 13, -0.12, 0, Math.PI * 2);
+    ctx.fill();
+
+    // neck + head
+    ctx.fillStyle = C.scale;
+    ctx.beginPath();
+    ctx.moveTo(8, -62); ctx.quadraticCurveTo(26, -84, 34, -92);
+    ctx.lineTo(48, -84); ctx.quadraticCurveTo(30, -66, 22, -50);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(40, -92, 19, 15, 0.18, 0, Math.PI * 2);
+    ctx.fill();
+
+    // snout
+    ctx.beginPath();
+    ctx.moveTo(50, -98); ctx.lineTo(72, -92); ctx.lineTo(50, -84);
+    ctx.closePath(); ctx.fill();
+
+    // horn
+    ctx.beginPath();
+    ctx.moveTo(32, -104); ctx.lineTo(24, -124); ctx.lineTo(42, -106);
+    ctx.closePath(); ctx.fill();
+
+    // eye
+    ctx.fillStyle = C.emberHi;
+    ctx.beginPath(); ctx.arc(46, -96, 3.4, 0, Math.PI * 2); ctx.fill();
+
+    // legs — little run cycle, tucked in the air
+    ctx.strokeStyle = C.scale; ctx.lineWidth = 9;
+    if (s.onGround) {
+      const sw = Math.sin(s.run * 0.6) * 17;
+      ctx.beginPath(); ctx.moveTo(2, -32); ctx.lineTo(2 + sw, 0); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-12, -32); ctx.lineTo(-12 - sw, 0); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.moveTo(2, -32); ctx.lineTo(16, -16); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-12, -32); ctx.lineTo(-22, -14); ctx.stroke();
+    }
+
+    // near wing, in front
+    ctx.fillStyle = C.wingHi;
+    ctx.save();
+    ctx.translate(-2, -64); ctx.rotate(-0.35 + flap * 1.15);
+    ctx.beginPath();
+    ctx.moveTo(0, 0); ctx.lineTo(-50, -36); ctx.lineTo(-34, 2); ctx.lineTo(-44, 24);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    // fire breath — a cone from the snout while striking
+    if (s.striking > 0) {
+      const p = 1 - s.striking / 190;
+      const len = REACH * Math.sin(Math.min(1, p * 1.6) * Math.PI * 0.9) + 26;
+      const g = ctx.createLinearGradient(72, -92, 72 + len, -92);
+      g.addColorStop(0, "rgba(255, 214, 130, 0.95)");
+      g.addColorStop(0.45, C.emberHi);
+      g.addColorStop(1, "rgba(210, 105, 30, 0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(70, -98);
+      ctx.quadraticCurveTo(72 + len * 0.6, -104 - len * 0.12, 72 + len, -92);
+      ctx.quadraticCurveTo(72 + len * 0.6, -80 + len * 0.12, 70, -86);
+      ctx.closePath(); ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  function drawStone(o) {
+    ctx.fillStyle = C.mid; ctx.strokeStyle = C.dim; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(o.x, GROUND);
+    ctx.lineTo(o.x + 8, GROUND - o.h);
+    ctx.lineTo(o.x + o.w - 10, GROUND - o.h * 0.82);
+    ctx.lineTo(o.x + o.w, GROUND);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+
+  function drawHusk(o) {
+    const t = o.hit ? 0.25 : 1;
+    ctx.save(); ctx.globalAlpha = t;
+    ctx.fillStyle = C.blood;
+    ctx.beginPath();
+    ctx.moveTo(o.x + o.w / 2, GROUND - o.h);
+    ctx.lineTo(o.x + o.w, GROUND - o.h * 0.45);
+    ctx.lineTo(o.x + o.w * 0.72, GROUND);
+    ctx.lineTo(o.x + o.w * 0.28, GROUND);
+    ctx.lineTo(o.x, GROUND - o.h * 0.45);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = C.ember;
+    ctx.beginPath(); ctx.arc(o.x + o.w * 0.38, GROUND - o.h * 0.62, 4, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(o.x + o.w * 0.62, GROUND - o.h * 0.62, 4, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+
+  function spawn(s) {
+    const husk = Math.random() < 0.42;
+    s.obstacles.push(husk
+      ? { kind: "husk",  x: W + 40, w: 62, h: HUSK_H, hit: false }
+      : { kind: "stone", x: W + 40, w: 54 + Math.random() * 34, h: 38 + Math.random() * 26 });
+    // Gap measured in pixels, not milliseconds, so spacing stays fair as speed climbs.
+    s.spawnIn = (700 + Math.random() * 700) / s.speed;
+  }
+
+  function burst(s, x, y) {
+    if (reduce) return;
+    for (let i = 0; i < 14; i++) {
+      s.embers.push({ x, y, vx: (Math.random() - 0.5) * 0.7,
+        vy: -Math.random() * 0.5 - 0.1, life: 420 + Math.random() * 300 });
+    }
+  }
+
+  function jump() {
+    if (state.over) { reset(); return; }
+    state.started = true;
+    if (state.onGround) { state.vy = JUMP_V; state.onGround = false; }
+  }
+  function strike() {
+    if (state.over) { reset(); return; }
+    state.started = true;
+    if (state.striking <= 0) state.striking = 190;
+  }
+
+  function update(dt) {
+    const s = state;
+    if (s.over || !s.started) return;
+
+    s.t += dt;
+    s.speed = Math.min(1.55, 0.62 + s.t / 42000);
+    s.dist += dt * s.speed * 0.05;
+    s.run += dt * s.speed * 0.09;
+
+    s.vy += GRAV * dt;
+    s.y += s.vy * dt;
+    if (s.y >= 0) { s.y = 0; s.vy = 0; s.onGround = true; }
+
+    if (s.striking > 0) s.striking -= dt;
+
+    s.spawnIn -= dt;
+    if (s.spawnIn <= 0) spawn(s);
+
+    // Body box kills. The breath box only burns husks — it never widens the
+    // hitbox that can kill you, so breathing fire near a stone is safe.
+    const bx = HERO_X - 20, bw = 44;
+    for (const o of s.obstacles) {
+      o.x -= dt * s.speed;
+      if (o.hit) continue;
+
+      const burning = s.striking > 0 && o.x < bx + bw + REACH && o.x + o.w > bx;
+      if (o.kind === "husk" && burning) {
+        o.hit = true;
+        burst(s, o.x + o.w / 2, GROUND - o.h * 0.6);
+        continue;
+      }
+
+      const bodyHit = o.x < bx + bw && o.x + o.w > bx && (GROUND - o.h) < (GROUND + s.y);
+      if (bodyHit) {
+        s.over = true;
+        const score = Math.floor(s.dist);
+        if (score > best) { best = score; store.set(best); }
+      }
+    }
+    s.obstacles = s.obstacles.filter(o => o.x > -140);
+
+    for (const e of s.embers) {
+      e.x += e.vx * dt; e.y += e.vy * dt; e.vy += 0.0008 * dt; e.life -= dt;
+    }
+    s.embers = s.embers.filter(e => e.life > 0);
+  }
+
+  function render() {
+    const s = state;
+
+    // sky
+    const sky = ctx.createLinearGradient(0, 0, 0, GROUND);
+    sky.addColorStop(0, C.night);
+    sky.addColorStop(1, C.fog);
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+
+    drawRidge(ridgeFar, s.dist * 3.2, GROUND - H * 0.13, C.far);
+    drawRidge(ridgeMid, s.dist * 7.5, GROUND - H * 0.04, C.mid);
+
+    ctx.fillStyle = C.ground; ctx.fillRect(0, GROUND, W, H - GROUND);
+    ctx.strokeStyle = C.dim; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, GROUND); ctx.lineTo(W, GROUND); ctx.stroke();
+
+    // ground ticks for speed read
+    ctx.strokeStyle = "rgba(139,134,119,0.4)"; ctx.lineWidth = 3;
+    for (let i = 0; i < 26; i++) {
+      const x = ((i * 96 - s.dist * 19) % (W + 96) + W + 96) % (W + 96) - 48;
+      ctx.beginPath(); ctx.moveTo(x, GROUND + 26); ctx.lineTo(x + 34, GROUND + 26); ctx.stroke();
+    }
+
+    for (const o of s.obstacles) (o.kind === "stone" ? drawStone : drawHusk)(o);
+    drawDragon(s);
+
+    for (const e of s.embers) {
+      ctx.globalAlpha = Math.max(0, e.life / 700);
+      ctx.fillStyle = C.emberHi;
+      ctx.fillRect(e.x, e.y, 5, 5);
+    }
+    ctx.globalAlpha = 1;
+
+    // score
+    ctx.font = '600 34px "IBM Plex Mono", monospace';
+    ctx.textAlign = "right"; ctx.fillStyle = C.bone;
+    ctx.fillText(String(Math.floor(s.dist)).padStart(5, "0"), W - 34, 60);
+    ctx.font = '400 20px "IBM Plex Mono", monospace';
+    ctx.fillStyle = C.dim;
+    ctx.fillText("BEST " + String(best).padStart(5, "0"), W - 34, 92);
+
+    if (!s.started || s.over) {
+      ctx.fillStyle = "rgba(13,17,23,0.72)"; ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = "center";
+      ctx.fillStyle = C.bone;
+      ctx.font = '56px "Archivo Black", Impact, sans-serif';
+      ctx.fillText(s.over ? "THE RUN ENDS" : "DRONNER", W / 2, H / 2 - 14);
+      ctx.font = '400 24px "IBM Plex Mono", monospace';
+      ctx.fillStyle = C.ember;
+      ctx.fillText(s.over ? "Space to run again" : "Space to begin", W / 2, H / 2 + 34);
+      ctx.textAlign = "left";
+    }
+  }
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(48, now - last); last = now;
+    update(dt); render();
+    requestAnimationFrame(loop);
+  }
+  document.fonts.ready.then(() => requestAnimationFrame(loop));
+
+  addEventListener("keydown", e => {
+    if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") { e.preventDefault(); jump(); }
+    else if (e.code === "ArrowDown" || e.code === "KeyS" || e.code === "KeyX") { e.preventDefault(); strike(); }
+    else if (e.code === "KeyR") reset();
+  });
+  cv.addEventListener("pointerdown", jump);
+  document.getElementById("bJump").addEventListener("click", jump);
+  document.getElementById("bStrike").addEventListener("click", strike);
+})();
+</script>
