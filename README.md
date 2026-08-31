@@ -2,7 +2,7 @@
 
 A little red dragon runs. Stones block the path, husks stand in it. Jump one, burn the other.
 
-**[▸ Play](https://hellmangui.github.io/dronner/)**
+Clone it and open `index.html`. No build, no dependencies, no install.
 
 ---
 
